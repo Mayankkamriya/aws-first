@@ -37,7 +37,11 @@ const upload = multer({
 const router = createRouter<NextApiRequestWithFile, NextApiResponse>();
 
 // Apply multer middleware
-router.use(upload.single("file"));
+// router.use(upload.single("file"));
+router.use(
+  upload.single("file") as unknown as (req: NextApiRequestWithFile, res: NextApiResponse, next: () => void) => void
+);
+
 
 router.post(async (req: NextApiRequestWithFile, res: NextApiResponse) => {
   const file = req.file;
