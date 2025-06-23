@@ -1,8 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createRouter } from "next-connect";
 import multer from "multer";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, PutObjectCommandInput } from "@aws-sdk/client-s3";
 
+interface CustomError extends Error {
+  code?: string;
+}
 // Custom request type
 interface NextApiRequestWithFile extends NextApiRequest {
   file: Express.Multer.File;
@@ -42,56 +45,43 @@ router.use(
   upload.single("file") as unknown as (req: NextApiRequestWithFile, res: NextApiResponse, next: () => void) => void
 );
 
-
-router.post(async (req: NextApiRequestWithFile, res: NextApiResponse) => {
+router.post(async (req, res) => {
   const file = req.file;
-  
-  if (!file) {
-    return res.status(400).json({ error: "No file provided" });
-  }
+  if (!file) return res.status(400).json({ error: "No file provided" });
 
-  // Generate a more unique filename
   const fileExtension = file.originalname.split('.').pop();
   const fileName = `uploads/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExtension}`;
 
-  const params = {
+  const params: PutObjectCommandInput = {
     Bucket: process.env.AWS_BUCKET_NAME!,
     Key: fileName,
     Body: file.buffer,
     ContentType: file.mimetype,
-    // Remove ACL parameter completely
   };
 
   try {
     const command = new PutObjectCommand(params);
     await s3.send(command);
-    
-    // Construct the public URL
     const url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
-    
-    console.log("File uploaded successfully:", url);
-    res.status(200).json({ 
-      url,
-      fileName,
-      fileSize: file.size,
-      mimeType: file.mimetype
-    });
-  } catch (err: any) {
-    console.error("S3 Upload Error:", err);
-    res.status(500).json({ 
-      error: err.message || "Upload failed",
-      code: err.code || "UNKNOWN_ERROR"
-    });
-  }
+
+    res.status(200).json({ url, fileName, fileSize: file.size, mimeType: file.mimetype });
+  } catch (err) {
+  const error = err as CustomError;
+  console.error("S3 Upload Error:", error);
+  res.status(500).json({
+    error: error.message || "Upload failed",
+    code: error.code || "UNKNOWN_ERROR"
+  });
+}
 });
 
-// Error handling
 router.handler({
-  onError: (err: any, req: NextApiRequest, res: NextApiResponse) => {
-    console.error("API Error:", err);
-    res.status(500).json({ error: `Something went wrong: ${err.message}` });
+  onError: (err, req, res) => {
+    const error = err as CustomError;
+    console.error("API Error:", error);
+    res.status(500).json({ error: `Something went wrong: ${error.message}` });
   },
-  onNoMatch: (req: NextApiRequest, res: NextApiResponse) => {
+  onNoMatch: (req, res) => {
     res.status(405).json({ error: `Method '${req.method}' Not Allowed` });
   },
 });
